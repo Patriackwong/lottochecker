@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ตรวจผลรางวัล</title>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; margin: 0; padding: 1em; background-color: #f0f2f5; }
+        .container { max-width: 600px; margin: auto; background: white; padding: 2em; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #1c1e21; }
+        .form-group { margin-bottom: 1.5em; }
+        label { display: block; margin-bottom: 0.5em; font-weight: bold; color: #4b4f56; }
+        select, textarea, button { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #dddfe2; font-size: 1em; font-family: 'Sarabun', sans-serif; box-sizing: border-box; }
+        textarea { height: 150px; resize: vertical; }
+        button { background-color: #1877f2; color: white; font-weight: bold; border: none; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #166fe5; }
+        #result-container { margin-top: 2em; padding: 1em; background: #f7f7f7; border-radius: 6px; }
+        .result-item { padding: 0.8em; border-bottom: 1px solid #e0e0e0; }
+        .result-item:last-child { border-bottom: none; }
+        .win { color: green; font-weight: bold; }
+        .lose { color: #888; }
+        .win::after { content: ' ✅ ยินดีด้วย! คุณถูกรางวัล'; }
+        .loader { text-align: center; display: none; padding: 1em; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="container">
+        <h1>🔍 ตรวจผลรางวัล</h1>
+
+        <div class="form-group">
+            <label for="lotto-type">เลือกประเภทหวย</label>
+            <select id="lotto-type">
+                <option value="ฮานอย ปกติ">ฮานอย ปกติ</option>
+                <option value="ลาวพัฒนา">ลาวพัฒนา</option>
+                <option value="ฮานอย พิเศษ">ฮานอย พิเศษ</option>
+                </select>
+        </div>
+
+        <div class="form-group">
+            <label for="user-numbers">กรอกเลขที่ซื้อ (แต่ละบรรทัดคือ 1 เลข)</label>
+            <textarea id="user-numbers" placeholder="ตัวอย่าง:
+095,5,,5
+065,5,,5
+95,10,10,
+59,10,10,
+65,10,10,
+56,10,10,"></textarea>
+            <small>รูปแบบ: เลข,ราคาบน,ราคาล่าง,ราคาโต๊ด (หากไม่มีให้เว้นว่าง)</small>
+        </div>
+
+        <button id="check-button">ตรวจผลรางวัล</button>
+
+        <div class="loader" id="loader">กำลังตรวจสอบ...</div>
+        <div id="result-container"></div>
+    </div>
+
+    <script>
+        // -----------------------------------------------------------------
+        // ✨ วางลิงก์ CSV ของ "ผลรางวัล" ที่คัดลอกมา ตรงนี้ ✨
+        // -----------------------------------------------------------------
+        const winningSheetUrl = 'YOUR_WINNING_NUMBERS_SHEET_URL_HERE';
+
+        const checkButton = document.getElementById('check-button');
+        checkButton.addEventListener('click', checkLottoResults);
+
+        // ฟังก์ชันสำหรับเรียงตัวอักษรในสตริง (สำหรับตรวจโต๊ด)
+        const sortString = (str) => str.split('').sort().join('');
+
+        async function checkLottoResults() {
+            const lottoType = document.getElementById('lotto-type').value;
+            const userNumbersRaw = document.getElementById('user-numbers').value.trim();
+            const resultContainer = document.getElementById('result-container');
+            const loader = document.getElementById('loader');
+
+            resultContainer.innerHTML = '';
+            if (!userNumbersRaw) {
+                resultContainer.innerHTML = '<p>กรุณากรอกเลขที่ต้องการตรวจ</p>';
+                return;
+            }
+
+            loader.style.display = 'block';
+            checkButton.disabled = true;
+
+            try {
+                // 1. ดึงข้อมูลผลรางวัลจาก Google Sheet
+                const response = await fetch(winningSheetUrl);
+                const csvText = await response.text();
+                const winningRows = csvText.split('\n');
+                const headers = winningRows[0].split(',');
+
+                // 2. หาผลรางวัลของหวยที่เลือก
+                let winningNumbers = null;
+                const todayWinningRow = winningRows.slice(1).find(row => row.split(',')[headers.indexOf('LotteryName')] === lottoType);
+
+                if (todayWinningRow) {
+                    const cols = todayWinningRow.split(',');
+                    winningNumbers = {
+                        top3: cols[headers.indexOf('Prize3Top')]?.trim(),
+                        bottom2: cols[headers.indexOf('Prize2Bottom')]?.trim(),
+                    };
+                } else {
+                    resultContainer.innerHTML = `<p>ไม่พบผลรางวัลสำหรับ "${lottoType}" ในวันนี้</p>`;
+                    loader.style.display = 'none';
+                    checkButton.disabled = false;
+                    return;
+                }
+
+                // 3. แยกข้อมูลเลขที่ผู้ใช้กรอก
+                const userBets = userNumbersRaw.split('\n').map(line => {
+                    const parts = line.split(',');
+                    return {
+                        number: parts[0]?.trim(),
+                        betTop: parts[1]?.trim(),
+                        betBottom: parts[2]?.trim(),
+                        betTod: parts[3]?.trim()
+                    };
+                });
+
+                // 4. ตรวจสอบและแสดงผล
+                let finalHtml = '<h3>ผลการตรวจสอบ:</h3>';
+                userBets.forEach(bet => {
+                    let isWin = false;
+
+                    // ตรวจ 3 ตัวบน
+                    if (bet.number === winningNumbers.top3 && bet.betTop) {
+                        isWin = true;
+                    }
+                    // ตรวจ 2 ตัวล่าง (ถ้าเลขที่ซื้อมี 2 ตัว)
+                    if (bet.number === winningNumbers.bottom2 && bet.betBottom) {
+                        isWin = true;
+                    }
+                    // ตรวจ 2 ตัวบน (ถ้าเลขที่ซื้อมี 2 ตัว และตรงกับ 2 ตัวท้ายของรางวัลที่ 1)
+                    if (bet.number.length === 2 && bet.number === winningNumbers.top3?.slice(-2) && bet.betTop) {
+                         isWin = true;
+                    }
+                    // ตรวจ 3 ตัวโต๊ด
+                    if (bet.number.length === 3 && bet.betTod && sortString(bet.number) === sortString(winningNumbers.top3)) {
+                        isWin = true;
+                    }
+
+                    if (isWin) {
+                        finalHtml += `<div class="result-item win">เลข ${bet.number}</div>`;
+                    } else {
+                        finalHtml += `<div class="result-item lose">เลข ${bet.number}</div>`;
+                    }
+                });
+
+                resultContainer.innerHTML = finalHtml;
+
+            } catch (error) {
+                console.error("Error:", error);
+                resultContainer.innerHTML = '<p style="color:red;">เกิดข้อผิดพลาดในการโหลดข้อมูลผลรางวัล</p>';
+            } finally {
+                loader.style.display = 'none';
+                checkButton.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
