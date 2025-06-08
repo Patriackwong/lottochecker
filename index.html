@@ -16,12 +16,9 @@
         button:hover { background-color: #166fe5; }
         button:disabled { background-color: #9dbcf3; cursor: not-allowed; }
         #ocr-status { text-align: center; padding: 1em; color: #333; font-weight: bold; background-color: #e9ecef; border-radius: 5px; margin-top: 1em; display: none; }
-        #result-container { margin-top: 1em; }
-        .result-item { padding: 0.8em; border-bottom: 1px solid #e0e0e0; }
-        .result-item:last-child { border-bottom: none; }
-        .win { color: green; font-weight: bold; }
-        .lose { color: #888; }
-        .win::after { content: ' ✅ ยินดีด้วย! คุณถูกรางวัล'; }
+        #result-container { margin-top: 1.5em; padding: 2em; text-align: center; border-radius: 8px; font-size: 1.5em; font-weight: bold; }
+        .result-win { background-color: #d1e7dd; color: #0f5132; }
+        .result-lose { background-color: #f8d7da; color: #842029; }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
     <script src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'></script>
@@ -55,43 +52,50 @@
         // -----------------------------------------------------------------
         // ✨ วางลิงก์ CSV ของ "ผลรางวัล" ที่คัดลอกมา ตรงนี้ ✨
         // -----------------------------------------------------------------
-        const winningSheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQiBp4Z2XVrllF6aly9pAtFZexQmMfz3fHvvQQE2o5HfhtioEWj4KWTj7uXZh_xwm5Fbi336KKipD4_/pub?output=csv';
+        const winningSheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQiBp4Z2XVrllF6aly9pAtFZexQmMfz3fHvvQQE2o5HfhtioEWj4KWTj7uXZh_xwm5Fbi336KKipD4_/pubhtml';
 
         const checkButton = document.getElementById('check-button');
         const imageInput = document.getElementById('lotto-image');
         const ocrStatus = document.getElementById('ocr-status');
         const resultContainer = document.getElementById('result-container');
 
-        checkButton.addEventListener('click', handleCheck);
-
-        const sortString = (str) => str ? str.split('').sort().join('') : '';
-
-        // ฟังก์ชันสำหรับแยกข้อความที่ OCR อ่านได้
+        // ฟังก์ชันสำหรับแยกข้อความที่ OCR อ่านได้ (เหมือนเดิม)
         function parseOcrText(text) {
             const bets = [];
             const lines = text.split('\n');
-            // Regex นี้พยายามจับ "เลข" ตามด้วย "ราคา" ในบรรทัดเดียวกัน
-            // \b(\d{2,3})\b คือเลข 2-3 ตัว
-            // (\d+)\s* คือราคา 1 ตัวเลขหรือมากกว่า
-            const regex = /\b(\d{2,3})\b\s+(\d+)\s*(\d+)?\s*(\d+)?/g;
-
             for (const line of lines) {
-                // เราสนใจบรรทัดที่มีแต่ตัวเลขและช่องว่าง
                 if (/^[\d\s]+$/.test(line.trim())) {
-                    const parts = line.trim().split(/\s+/); // แบ่งด้วยช่องว่าง
-                    if (parts.length >= 2) {
+                    const parts = line.trim().split(/\s+/);
+                    if (parts.length >= 2 && (parts[0].length === 2 || parts[0].length === 3)) {
                         bets.push({
                             number: parts[0],
                             betTop: parts[1],
-                            betBottom: parts.length > 2 ? parts[2] : null, // ถ้ามีคอลัมน์ที่ 3
-                            betTod: parts.length > 3 ? parts[3] : null, // ถ้ามีคอลัมน์ที่ 4 (แบบในรูปคือโต๊ด)
+                            betBottom: parts.length > 2 ? parts[2] : null,
+                            betTod: parts.length > 3 ? parts[3] : null,
                         });
                     }
                 }
             }
-             console.log("Parsed bets:", bets);
+            console.log("Parsed bets:", bets);
             return bets;
         }
+
+        // NEW: ฟังก์ชันตรวจโต๊ดแบบ "6 กลับ" (6 ใช้แทน 9 ได้)
+        function checkTodWith69Rule(userNumber, winningNumber) {
+            if (!userNumber || !winningNumber || userNumber.length !== 3 || winningNumber.length !== 3) {
+                return false;
+            }
+            // เปลี่ยนเลข 6 ทั้งหมดให้เป็น 9 ทั้งในเลขที่ซื้อและเลขรางวัล
+            const canonicalUser = userNumber.replace(/6/g, '9');
+            const canonicalWinning = winningNumber.replace(/6/g, '9');
+
+            // เรียงลำดับตัวเลขในแต่ละชุด แล้วเทียบกัน
+            const sortedUser = canonicalUser.split('').sort().join('');
+            const sortedWinning = canonicalWinning.split('').sort().join('');
+            
+            return sortedUser === sortedWinning;
+        }
+
 
         async function handleCheck() {
             const lottoType = document.getElementById('lotto-type').value;
@@ -102,23 +106,21 @@
                 return;
             }
 
-            // --- เริ่มกระบวนการ OCR ---
             checkButton.disabled = true;
             ocrStatus.style.display = 'block';
             ocrStatus.textContent = 'กำลังเตรียมตัวอ่านภาพ...';
             resultContainer.innerHTML = '';
+            resultContainer.className = '';
 
             try {
                 const worker = await Tesseract.createWorker('tha+eng');
                 ocrStatus.textContent = 'กำลังประมวลผลและดึงข้อความจากภาพ... (อาจใช้เวลาสักครู่)';
-                
                 const { data: { text } } = await worker.recognize(imageFile);
                 await worker.terminate();
 
                 ocrStatus.textContent = 'ดึงข้อความสำเร็จ! กำลังตรวจสอบกับผลรางวัล...';
-                console.log("Raw OCR Text:", text); // แสดงข้อความดิบที่อ่านได้ใน Console เพื่อดีบัก
-
-                // --- เริ่มตรวจสอบกับผลรางวัล ---
+                console.log("Raw OCR Text:", text);
+                
                 const userBets = parseOcrText(text);
                 if (userBets.length === 0) {
                      resultContainer.innerHTML = '<p style="color:red;">ไม่สามารถหาข้อมูลตัวเลขจากรูปภาพได้ กรุณาลองกับภาพที่ชัดเจนกว่านี้</p>';
@@ -140,29 +142,39 @@
                         bottom2: cols[headers.indexOf('Prize2Bottom')]?.trim(),
                     };
                 } else {
-                    resultContainer.innerHTML = `<p>ไม่พบผลรางวัลสำหรับ "${lottoType}" ในวันนี้</p>`;
+                    resultContainer.className = 'result-lose';
+                    resultContainer.textContent = `ไม่พบผลรางวัลสำหรับ "${lottoType}"`;
                     return;
                 }
 
-                let finalHtml = '<h3>ผลการตรวจสอบ:</h3>';
-                userBets.forEach(bet => {
-                    let isWin = false;
-                    // ตรวจ 3 ตัวบน
-                    if (bet.number === winningNumbers.top3 && bet.betTop) isWin = true;
-                    // ตรวจ 2 ตัวล่าง
-                    if (bet.number === winningNumbers.bottom2 && bet.betBottom) isWin = true;
-                    // ตรวจ 2 ตัวบน
-                    if (bet.number.length === 2 && bet.number === winningNumbers.top3?.slice(-2) && bet.betTop) isWin = true;
-                    // ตรวจ 3 ตัวโต๊ด
-                    if (bet.number.length === 3 && bet.betTod && sortString(bet.number) === sortString(winningNumbers.top3)) isWin = true;
+                // --- CHANGED: ตรวจสอบผลและสรุปรวม ---
+                let hasAnyWin = false; // สร้างตัวแปรมาเก็บสถานะว่าถูกหวยหรือไม่
 
-                    finalHtml += `<div class="result-item ${isWin ? 'win' : 'lose'}">เลข ${bet.number}</div>`;
+                userBets.forEach(bet => {
+                    if (hasAnyWin) return; // ถ้าเจอรางวัลแล้ว ไม่ต้องตรวจต่อ
+
+                    // ตรวจ 3 ตัวบน (เต็ง)
+                    if (bet.number === winningNumbers.top3 && bet.betTop) hasAnyWin = true;
+                    // ตรวจ 2 ตัวล่าง
+                    if (bet.number === winningNumbers.bottom2 && bet.betBottom) hasAnyWin = true;
+                    // ตรวจ 2 ตัวบน
+                    if (bet.number.length === 2 && bet.number === winningNumbers.top3?.slice(-2) && bet.betTop) hasAnyWin = true;
+                    // ตรวจ 3 ตัวโต๊ด (ด้วยกฎ 6 กลับ)
+                    if (bet.betTod && checkTodWith69Rule(bet.number, winningNumbers.top3)) hasAnyWin = true;
                 });
-                resultContainer.innerHTML = finalHtml;
+                
+                // --- CHANGED: แสดงผลลัพธ์สุดท้าย ---
+                if (hasAnyWin) {
+                    resultContainer.className = 'result-win';
+                    resultContainer.textContent = '🎉 ยินดีด้วยคุณถูกหวย 🎉';
+                } else {
+                    resultContainer.className = 'result-lose';
+                    resultContainer.textContent = 'คุณไม่ถูกหวย';
+                }
 
             } catch (error) {
                 console.error(error);
-                resultContainer.innerHTML = '<p style="color:red;">เกิดข้อผิดพลาดร้ายแรงระหว่างการประมวลผล</p>';
+                resultContainer.textContent = 'เกิดข้อผิดพลาดร้ายแรงระหว่างการประมวลผล';
             } finally {
                 ocrStatus.style.display = 'none';
                 checkButton.disabled = false;
